@@ -1,5 +1,4 @@
 (library
  (name combining_tree)
  (modules types node tree)
- (preprocess (pps ppx_jane))
  (flags (:standard -w -58)))

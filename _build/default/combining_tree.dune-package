@@ -1,0 +1,5 @@
+(lang dune 3.21)
+(name combining_tree)
+(version 0.1.0)
+(sections (lib .) (doc ../../doc/combining_tree))
+(files (lib (META dune-package)) (doc (README.md)))

@@ -1,7 +1,9 @@
 (lang dune 3.0)
 (name combining_tree)
 (version 0.1.0)
-(synopsis "Software Combining Tree for Scalable Shared Counting")
-(description "An OCaml 5 implementation of a combining tree for efficient concurrent shared counting")
-(authors "Your Name")
-(license MIT)
+(package
+ (name combining_tree)
+ (allow_empty)
+ (synopsis "Software Combining Tree for Scalable Shared Counting")
+ (description "An OCaml 5 implementation of a combining tree for efficient concurrent shared counting")
+ (authors "Your Name"))

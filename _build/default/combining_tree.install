@@ -1,0 +1,7 @@
+lib: [
+  "_build/install/default/lib/combining_tree/META"
+  "_build/install/default/lib/combining_tree/dune-package"
+]
+doc: [
+  "_build/install/default/doc/combining_tree/README.md"
+]

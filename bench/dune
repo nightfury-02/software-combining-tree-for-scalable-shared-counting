@@ -1,0 +1,4 @@
+(executable
+ (name bench_main)
+ (libraries unix combining_tree)
+ (flags (:standard -w -58)))

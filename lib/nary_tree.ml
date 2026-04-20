@@ -1,0 +1,142 @@
+open Nary_types
+
+type 'a t = {
+  root : 'a node;
+  leaves : 'a node array;
+  nodes : 'a node array;
+  combine : 'a -> 'a -> 'a;
+  fanout : int;
+}
+
+let create_node fanout init : 'a node =
+  {
+    status = Atomic.make 0;
+    depart_count = Atomic.make 0;
+    joined_count = Atomic.make 0;
+    values = Array.init fanout (fun _ -> Atomic.make None);
+    results = Array.init fanout (fun _ -> Atomic.make None);
+    result = Atomic.make init;
+    parent = None;
+    children = [||];
+    fanout;
+  }
+
+let rec create_tree_internal height fanout parent init : 'a node =
+  let node = create_node fanout init in
+  node.parent <- parent;
+  if height > 0 then begin
+    let children = Array.init fanout (fun _ -> create_tree_internal (height - 1) fanout (Some node) init) in
+    node.children <- children
+  end;
+  node
+
+let rec collect_leaves node =
+  if Array.length node.children = 0 then [node]
+  else
+    Array.fold_left (fun acc c -> acc @ collect_leaves c) [] node.children
+
+let rec collect_nodes node =
+  if Array.length node.children = 0 then [node]
+  else
+    node :: Array.fold_left (fun acc c -> acc @ collect_nodes c) [] node.children
+
+let create_tree ~height ~fanout ~init ~combine : 'a t =
+  if height < 0 then invalid_arg "Nary_tree: height must be >= 0";
+  if fanout < 1 then invalid_arg "Nary_tree: fanout must be >= 1";
+  let root = create_tree_internal height fanout None init in
+  {
+    root;
+    leaves = Array.of_list (collect_leaves root);
+    nodes = Array.of_list (collect_nodes root);
+    combine;
+    fanout;
+  }
+
+let leaves t = t.leaves
+
+let fetch_and_combine t ~start value =
+  let rec ascend node current_val stack =
+    let (is_combiner, index) = Nary_node.precombine node in
+    if is_combiner then begin
+      let count = Nary_node.lock_for_combine node in
+      
+      (* Gather values from followers, if any (followers are index 1 to count-1) *)
+      let follower_values = Array.make (count - 1) current_val in (* initialization, will overwrite *)
+      for i = 1 to count - 1 do
+        follower_values.(i - 1) <- Nary_node.wait_for_value node i
+      done;
+
+      (* Compute total value starting with my own value *)
+      let total_val = ref current_val in
+      for i = 0 to count - 2 do
+        total_val := t.combine !total_val follower_values.(i)
+      done;
+
+      let is_root = (node.parent = None) in
+      if is_root then begin
+        let rec atomic_combine () =
+          let old = Atomic.get node.result in
+          let next = t.combine old !total_val in
+          if Atomic.compare_and_set node.result old next then old
+          else begin Domain.cpu_relax (); atomic_combine () end
+        in
+        let prior = atomic_combine () in
+        let stack = (node, count, current_val, follower_values) :: stack in
+        (stack, prior)
+      end else begin
+        let stack = (node, count, current_val, follower_values) :: stack in
+        ascend (Option.get node.parent) !total_val stack
+      end
+    end else begin
+      (* Is a follower *)
+      Atomic.set node.values.(index) (Some current_val);
+      Nary_node.wait_for_result node;
+      let prior =
+        match Atomic.get node.results.(index) with
+        | Some v -> v
+        | None -> assert false
+      in
+      (* Process departure *)
+      let left = Atomic.fetch_and_add node.depart_count 1 in
+      let total_followers = (Atomic.get node.joined_count) - 1 in
+      if left + 1 = total_followers then begin
+        Atomic.set node.depart_count 0;
+        Atomic.set node.status 0; (* Reset to IDLE *)
+      end;
+      (stack, prior)
+    end
+  in
+  let (stack, prior_from_top) = ascend start value [] in
+
+  (* Combiner descends to distribute results *)
+  let rec descend prior stack =
+    match stack with
+    | [] -> prior
+    | (node, count, my_val, follower_values) :: rest ->
+        Atomic.set node.joined_count count;
+        Atomic.set node.results.(0) (Some prior);
+        
+        let current_prior = ref (t.combine prior my_val) in
+        for i = 1 to count - 1 do
+          Atomic.set node.results.(i) (Some !current_prior);
+          current_prior := t.combine !current_prior follower_values.(i - 1)
+        done;
+        
+        (* Cleanup values array for next round *)
+        for i = 1 to count - 1 do
+          Atomic.set node.values.(i) None
+        done;
+
+        if count = 1 then begin
+          (* Combiner is alone, just reset to IDLE directly without waking anyone *)
+          Atomic.set node.status 0
+        end else begin
+          (* Wake up followers *)
+          Atomic.set node.status (-2)
+        end;
+        descend prior rest
+  in
+  descend prior_from_top stack
+
+let create_counting_tree ~height ~fanout = create_tree ~height ~fanout ~init:0 ~combine:( + )
+let fetch_and_increment t ~start = fetch_and_combine t ~start 1

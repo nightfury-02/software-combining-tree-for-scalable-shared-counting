@@ -1,0 +1,8 @@
+_build/
+_build_fresh/
+_build_verify/
+*.install
+*.merlin
+*.swp
+*.swo
+*~

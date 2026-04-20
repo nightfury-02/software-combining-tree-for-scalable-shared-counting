@@ -14,7 +14,7 @@ type node = {
   first_value : int Atomic.t;       (** Value from first thread *)
   second_value : int Atomic.t;      (** Value from second thread *)
   result : int Atomic.t;            (** Result of the combined operation *)
-  parent : node option;             (** Parent node (immutable) *)
-  left : node option;               (** Left child (immutable) *)
-  right : node option;              (** Right child (immutable) *)
+  mutable parent : node option;     (** Parent node *)
+  mutable left : node option;       (** Left child *)
+  mutable right : node option;      (** Right child *)
 }

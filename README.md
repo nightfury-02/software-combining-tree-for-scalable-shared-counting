@@ -56,44 +56,34 @@ eval $(opam env)
 
 Run the complete test suite:
 ```bash
-dune exec test/test_runner.exe
+dune runtest
 ```
 
 ### Test Descriptions
 
-1. **Tree Creation Test**: Verifies that the tree is properly initialized with the root marked as `ROOT` status
-2. **Sequential Test**: Runs 5 sequential `fetch_and_increment` operations to verify basic correctness
-3. **Concurrent Test**: Spawns 2 concurrent OCaml Domains performing `fetch_and_increment` simultaneously
+1. **Tree Shape + Root Test**: Verifies root status and parent-child linkage consistency.
+2. **Single-Thread Tests**: Validates contiguous ticket allocation in short and long sequential runs.
+3. **Multi-Thread Correctness Tests**: Uses multiple domains and many operations per domain, checking no duplicates/gaps.
+4. **High Stress Test**: Runs larger concurrent workloads and repeated rounds to catch race-related regressions.
 
-Expected output:
+You can also run the test binary directly:
+```bash
+dune exec test/test_runner.exe
+```
+
+Expected output shape:
 ```
 Software Combining Tree Test Suite
 ===================================
 
-=== Tree Creation Test ===
-Created tree of height 2
-Root status: ROOT
+[PASS] tree_shape_and_root_status
+[PASS] single_thread_basic
+[PASS] single_thread_long_run
+[PASS] multi_thread_small
+[PASS] multi_thread_medium
+[PASS] high_stress
 
-=== Sequential Test ===
-Call 0: got 0
-Call 1: got 1
-Call 2: got 2
-Call 3: got 3
-Call 4: got 4
-Expected: 0 1 2 3 4 
-Actual:   0 1 2 3 4 
-✓ Sequential test PASSED
-
-=== Simple Concurrent Test (2 threads) ===
-Thread 0 starting
-Thread 0 got 0
-Waiting for threads...
-Thread 1 starting
-Thread 1 got 1
-Thread 0 result: 0
-Thread 1 result: 1
-
-All tests completed!
+All tests passed.
 ```
 
 ## Project Structure

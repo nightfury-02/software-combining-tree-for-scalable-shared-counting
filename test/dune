@@ -1,4 +1,4 @@
-(executable
+(test
  (name test_runner)
  (modules test_runner)
  (libraries combining_tree)

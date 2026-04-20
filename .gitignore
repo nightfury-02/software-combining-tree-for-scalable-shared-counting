@@ -6,3 +6,4 @@ _build_verify/
 *.swp
 *.swo
 *~
+test_reference/

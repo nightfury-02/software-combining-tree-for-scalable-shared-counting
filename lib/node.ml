@@ -24,34 +24,37 @@ let rec precombine node =
       precombine node  (* Spin wait and retry *)
 
 (** Combine phase: lock-free via CAS - called after precombine *)
-let combine node combined_val is_first =
+let combine combine_fn node combined_val is_first =
   if is_first then begin
     (* Thread was first: store first_value and return it *)
-    Atomic.set node.first_value combined_val;
+    Atomic.set node.first_value (Some combined_val);
     combined_val
   end else begin
-    (* Thread was second: store second_value and compute sum *)
-    Atomic.set node.second_value combined_val;
+    (* Thread was second: store second_value and compute combined value *)
+    Atomic.set node.second_value (Some combined_val);
     let first = Atomic.get node.first_value in
-    first + combined_val
+    match first with
+    | Some v -> combine_fn v combined_val
+    | None -> combined_val
   end
 
 (** Op phase: perform the operation at this node *)
-let op node combined_val =
+let op combine_fn node combined_val =
   let s = Atomic.get node.status in
   match s with
   | ROOT | FIRST ->
-      (* Atomically add to result using CAS loop *)
-      let rec fetch_add () =
+      (* Atomically combine into result using CAS loop *)
+      let rec fetch_combine () =
         let old = Atomic.get node.result in
-        if Atomic.compare_and_set node.result old (old + combined_val) then
+        let next = combine_fn old combined_val in
+        if Atomic.compare_and_set node.result old next then
           old
         else begin
           Domain.cpu_relax ();
-          fetch_add ()
+          fetch_combine ()
         end
       in
-      fetch_add ()
+      fetch_combine ()
   | SECOND ->
       (* Spin-wait for result to be available *)
       let rec wait_for_result () =
@@ -71,7 +74,7 @@ let op node combined_val =
       combined_val
 
 (** Distribute phase: pass result to waiting thread or reset *)
-let distribute node prior is_first =
+let distribute combine_fn node prior is_first =
   let is_root = node.parent = None in
   if is_first then begin
     (* First thread resets the node, unless it's the root *)
@@ -80,7 +83,11 @@ let distribute node prior is_first =
     (* Root stays ROOT permanently *)
   end else begin
     (* Second thread calculates result and signals *)
-    let new_res = prior + Atomic.get node.first_value in
+    let new_res =
+      match Atomic.get node.first_value with
+      | Some v -> combine_fn prior v
+      | None -> prior
+    in
     Atomic.set node.result new_res;
     if not is_root then
       Atomic.set node.status RESULT

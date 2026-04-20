@@ -8,3 +8,6 @@ module Node = Node
 
 (** Tree construction and fetch_and_increment operations *)
 module Tree = Tree
+
+(** Baseline counters for benchmarking and correctness comparisons *)
+module Baseline = Baseline

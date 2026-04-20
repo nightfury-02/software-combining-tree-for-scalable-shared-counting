@@ -1,50 +1,73 @@
 open Types
 
-(** Tree construction and fetch_and_increment logic for the combining tree *)
+(** Tree construction and generic combine logic for the combining tree *)
+
+type 'a t = {
+  root : 'a node;
+  leaves : 'a node array;
+  nodes : 'a node array;
+  combine : 'a -> 'a -> 'a;
+}
 
 (** Create a node with optional ROOT status *)
-let create_node is_root : node =
+let create_node is_root init : 'a node =
   {
     status = Atomic.make (if is_root then ROOT else IDLE);
-    first_value = Atomic.make 0;
-    second_value = Atomic.make 0;
-    result = Atomic.make 0;
+    first_value = Atomic.make None;
+    second_value = Atomic.make None;
+    result = Atomic.make init;
     parent = None;
     left = None;
     right = None;
   }
 
-(** Create a leaf node with IDLE status *)
-let create_leaf () : node = create_node false
-
-(** Create a root node with ROOT status *)
-let create_root () : node = create_node true
-
 (** Create a tree with given height *)
-let rec create_tree_internal height parent is_root : node =
-  let node = create_node is_root in
+let rec create_tree_internal height parent is_root init : 'a node =
+  let node = create_node is_root init in
   node.parent <- parent;
   if height > 0 then begin
-    let left = create_tree_internal (height - 1) (Some node) false in
-    let right = create_tree_internal (height - 1) (Some node) false in
+    let left = create_tree_internal (height - 1) (Some node) false init in
+    let right = create_tree_internal (height - 1) (Some node) false init in
     node.left <- Some left;
     node.right <- Some right
   end;
   node
 
-(** Create a tree with given height and mark root as ROOT *)
-let create_tree height : node =
+let rec collect_leaves node =
+  match (node.left, node.right) with
+  | None, None -> [ node ]
+  | Some l, Some r -> collect_leaves l @ collect_leaves r
+  | _ -> invalid_arg "Tree.collect_leaves: malformed tree"
+
+let rec collect_nodes node =
+  match (node.left, node.right) with
+  | None, None -> [ node ]
+  | Some l, Some r -> node :: (collect_nodes l @ collect_nodes r)
+  | _ -> invalid_arg "Tree.collect_nodes: malformed tree"
+
+let create_tree ~height ~init ~combine : 'a t =
   if height < 0 then
     invalid_arg "Tree.create_tree: height must be >= 0";
-  create_tree_internal height None true
+  let root = create_tree_internal height None true init in
+  {
+    root;
+    leaves = Array.of_list (collect_leaves root);
+    nodes = Array.of_list (collect_nodes root);
+    combine;
+  }
 
-(** Fetch and increment operation.
-    Start from any node in the tree and perform an atomic increment at root. *)
-let fetch_and_increment node =
+let root t = t.root
+let leaves t = t.leaves
+let nodes t = t.nodes
+
+let fetch_and_combine t ~start value =
   let rec find_root curr =
     match curr.parent with
     | Some parent -> find_root parent
     | None -> curr
   in
-  let root = find_root node in
-  Node.op root 1
+  let root_node = find_root start in
+  Node.op t.combine root_node value
+
+let create_counting_tree ~height = create_tree ~height ~init:0 ~combine:( + )
+let fetch_and_increment t ~start = fetch_and_combine t ~start 1

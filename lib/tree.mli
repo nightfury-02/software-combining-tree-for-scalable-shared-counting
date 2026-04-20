@@ -1,15 +1,23 @@
-(** Interface for tree construction and fetch_and_increment operations *)
+(** Interface for tree construction and generic combine operations *)
 
-(** Create a leaf node *)
-val create_leaf : unit -> Types.node
+type 'a t
 
-(** Create a root node with ROOT status *)
-val create_root : unit -> Types.node
+(** Create a tree with given height, initial accumulator, and associative combine op *)
+val create_tree : height:int -> init:'a -> combine:('a -> 'a -> 'a) -> 'a t
 
-(** Fetch and increment operation on the combining tree
-    Starting from a leaf node, traverses up the tree via CAS-based precombine,
-    performs combining at the appropriate node, and returns the prior value *)
-val fetch_and_increment : Types.node -> int
+(** Root node of the tree *)
+val root : 'a t -> 'a Types.node
 
-(** Create a tree with given height *)
-val create_tree : int -> Types.node
+(** Leaf nodes of the tree *)
+val leaves : 'a t -> 'a Types.node array
+
+(** All nodes in the tree *)
+val nodes : 'a t -> 'a Types.node array
+
+(** Atomically combine a value into the tree accumulator from a chosen start node.
+    Returns the prior aggregate value. *)
+val fetch_and_combine : 'a t -> start:'a Types.node -> 'a -> 'a
+
+(** Convenience API for counting (addition with +1 updates). *)
+val create_counting_tree : height:int -> int t
+val fetch_and_increment : int t -> start:int Types.node -> int

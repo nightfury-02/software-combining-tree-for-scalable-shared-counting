@@ -1,6 +1,6 @@
-# Software Combining Tree for Scalable Shared Counting
+# Software Combining Tree with Generic Associative Operations
 
-A lock-free, concurrent implementation of a Software Combining Tree in OCaml 5. This project implements the combining tree algorithm described in *The Art of Multiprocessor Programming* using Compare-and-Swap (CAS) atomic operations and OCaml 5 Domains for concurrent execution.
+A lock-free, concurrent implementation of a Software Combining Tree in OCaml 5. The tree supports any associative combine function `'a -> 'a -> 'a` (for example addition and max), implemented with Compare-and-Swap (CAS) atomic operations and OCaml 5 Domains.
 
 ## Overview
 
@@ -9,8 +9,8 @@ The combining tree is a scalable, wait-free data structure for performing shared
 **Key Features:**
 - Lock-free synchronization using CAS-based atomic operations
 - OCaml 5 Domains for true concurrency
-- Proper thread combining at internal tree nodes
-- Scalable shared counter implementation
+- Generic associative combination: `'a -> 'a -> 'a`
+- Demonstrated operations: counting (sum) and max-finding
 - Sequential and concurrent testing
 
 ## Prerequisites

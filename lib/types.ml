@@ -9,12 +9,12 @@ type status =
   | ROOT       (** This is the root node *)
 
 (** Node record representing a node in the combining tree *)
-type node = {
+type 'a node = {
   status : status Atomic.t;         (** Current status of the node (CAS-based) *)
-  first_value : int Atomic.t;       (** Value from first thread *)
-  second_value : int Atomic.t;      (** Value from second thread *)
-  result : int Atomic.t;            (** Result of the combined operation *)
-  mutable parent : node option;     (** Parent node *)
-  mutable left : node option;       (** Left child *)
-  mutable right : node option;      (** Right child *)
+  first_value : 'a option Atomic.t; (** Value from first thread *)
+  second_value : 'a option Atomic.t;(** Value from second thread *)
+  result : 'a Atomic.t;             (** Result of the combined operation *)
+  mutable parent : 'a node option;  (** Parent node *)
+  mutable left : 'a node option;    (** Left child *)
+  mutable right : 'a node option;   (** Right child *)
 }

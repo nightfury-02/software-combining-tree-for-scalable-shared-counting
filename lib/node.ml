@@ -55,7 +55,7 @@ let op combine_fn node combined_val =
         end
       in
       fetch_combine ()
-  | SECOND ->
+  | SECOND | RESULT ->
       (* Spin-wait for result to be available *)
       let rec wait_for_result () =
         if Atomic.get node.status <> RESULT then begin

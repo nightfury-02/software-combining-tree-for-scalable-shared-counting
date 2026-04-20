@@ -3,3 +3,9 @@
  (modules test_runner)
  (libraries combining_tree)
  (flags (:standard -w -58)))
+
+(test
+ (name qcheck_lin_combining_tree)
+ (modules qcheck_lin_combining_tree)
+ (libraries combining_tree qcheck-lin.domain)
+ (flags (:standard -w -58)))

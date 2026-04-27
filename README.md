@@ -1,77 +1,81 @@
-# Software Combining Tree with Generic Associative Operations
+# Software Combining Tree for Scalable Shared Counting
 
-A lock-free, concurrent implementation of a Software Combining Tree in OCaml 5. The tree supports any associative combine function `'a -> 'a -> 'a` (for example addition and max), implemented with Compare-and-Swap (CAS) atomic operations and OCaml 5 Domains.
+A lock-free, concurrent implementation of a **Software Combining Tree** in **OCaml 5**, designed to reduce contention in shared counters using hierarchical aggregation and atomic synchronization.
+
+---
 
 ## Overview
 
-The combining tree is a scalable, wait-free data structure for performing shared counting operations in highly concurrent environments. Instead of having all threads contend on a single lock or atomic counter, threads coordinate at multiple levels of a tree structure, which reduces contention and improves scalability.
+In concurrent systems, shared counters become performance bottlenecks due to contention among threads. This project implements a **combining tree**, where threads aggregate operations across a tree structure before applying them to a shared value. This reduces contention and improves scalability.
 
-**Key Features:**
-- Lock-free synchronization using CAS-based atomic operations
-- OCaml 5 Domains for true concurrency
-- Generic associative combination: `'a -> 'a -> 'a`
-- Demonstrated operations: counting (sum) and max-finding
-- Sequential and concurrent testing
+The implementation uses:
+- **OCaml 5 Domains** for parallel execution  
+- **CAS (Compare-And-Swap)** for lock-free synchronization  
+- A **generic associative function** (`'a -> 'a -> 'a`) for flexible aggregation  
+
+---
+
+## Features
+
+- Lock-free synchronization using atomic operations  
+- Scalable tree-based contention reduction  
+- Generic operation support (sum, max, etc.)  
+- Parallel execution using OCaml Domains  
+- Comprehensive correctness testing  
+- Benchmarking support for performance evaluation  
+
+---
 
 ## Prerequisites
 
-You need to have the following installed:
+Ensure the following are installed:
 
-- **OCaml 5.0+** (with Domains support)
-- **Dune 3.0+** (OCaml build system)
-- **Opam** (OCaml package manager) - optional, but recommended
+- OCaml **5.0+**
+- Dune **3.0+**
+- Opam (recommended)
 
-### Installation
+### Setup (Linux)
 
-On Ubuntu/Debian:
 ```bash
 sudo apt-get install ocaml opam build-essential
 opam switch create 5.0.0
 eval $(opam env)
 ```
 
-On macOS:
+### Setup (macOS)
+
 ```bash
 brew install ocaml opam
 opam switch create 5.0.0
 eval $(opam env)
 ```
 
-## Building the Project
+---
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/yourusername/combining-tree.git
-   cd combining-tree
-   ```
+## Build Instructions
 
-2. **Build the project:**
-   ```bash
-   dune build
-   ```
+```bash
+git clone https://github.com/yourusername/combining-tree.git
+cd combining-tree
+dune build
+```
 
-   This will compile the library and test executable.
+---
 
 ## Running Tests
 
-Run the complete test suite:
 ```bash
 dune runtest
 ```
 
-### Test Descriptions
+Or run directly:
 
-1. **Tree Shape + Root Test**: Verifies root status and parent-child linkage consistency.
-2. **Single-Thread Tests**: Validates contiguous ticket allocation in short and long sequential runs.
-3. **Multi-Thread Correctness Tests**: Uses multiple domains and many operations per domain, checking no duplicates/gaps.
-4. **High Stress Test**: Runs larger concurrent workloads and repeated rounds to catch race-related regressions.
-
-You can also run the test binary directly:
 ```bash
 dune exec test/test_runner.exe
 ```
 
-Expected output shape:
+### Expected Output
+
 ```
 Software Combining Tree Test Suite
 ===================================
@@ -86,108 +90,139 @@ Software Combining Tree Test Suite
 All tests passed.
 ```
 
+---
+
+## Benchmarking
+
+### Run Benchmark
+
+```bash
+dune exec bench/ben
+```
+
+### Control Parallelism
+
+```bash
+OCAMLRUNPARAM="D=4" dune exec test/bench.exe
+```
+
+---
+
+### Metrics Measured
+
+- Execution time  
+- Throughput (operations/sec)  
+- Scalability vs number of domains  
+
+---
+
+### Example Output
+
+```
+Domains: 4
+Operations per domain: 100000
+
+Atomic FAA:        0.12s
+CAS Loop:          0.45s
+Combining Tree:    0.20s
+```
+
+---
+
+### Interpretation
+
+- **Atomic FAA** → Best for low contention  
+- **CAS Loop** → Poor performance under contention  
+- **Combining Tree** → Scales better with higher contention  
+
+---
+
 ## Project Structure
 
 ```
 combining-tree/
-├── dune-project              # Project configuration
-├── README.md                 # This file
+├── dune-project
+├── README.md
 ├── lib/
-│   ├── dune                  # Library build file
-│   ├── types.ml              # Type definitions (status enum, node record)
-│   ├── types.mli             # Types interface
-│   ├── node.ml               # CAS-based node operations
-│   ├── node.mli              # Node interface
-│   ├── tree.ml               # Tree construction and fetch_and_increment logic
-│   ├── tree.mli              # Tree interface
-│   └── combining_tree.mli    # Main library interface
+│   ├── types.ml
+│   ├── node.ml
+│   ├── tree.ml
+│   ├── tree.mli
+│   └── combining_tree.mli
 └── test/
-    ├── dune                  # Test executable build file
-    └── test_runner.ml        # Test suite with OCaml 5 Domains
+    ├── test_runner.ml
+    └── bench.ml
 ```
 
-## Algorithm Overview
+---
 
-### Four Phases of Operation
+## Algorithm Summary
 
-Each call to `fetch_and_increment` follows the combining tree algorithm:
+Each operation follows four phases:
 
-1. **Ascend (Precombine)**: Threads traverse upward from a leaf node using CAS-based synchronization
-   - First thread to arrive at a node: transitions IDLE → FIRST
-   - Second thread to arrive at a node: transitions FIRST → SECOND and stops
-   
-2. **Combine**: The second thread waits while the first thread continues ascending
-   - Values are accumulated at each node
+1. **Precombine (Ascend)**
+   - Threads move up the tree
+   - First thread marks node as FIRST
+   - Second thread marks node as SECOND  
 
-3. **Operation**: At the combining node, the accumulated value is atomically added to the result
+2. **Combine**
+   - Values are aggregated at nodes  
 
-4. **Descend (Distribute)**: Results are distributed back down the tree to waiting threads
+3. **Operation**
+   - Root applies combined result  
 
-### Status State Machine
+4. **Distribute (Descend)**
+   - Results propagated back to threads  
 
-Each node maintains a status field with four possible states:
-
-- **IDLE**: Node is inactive
-- **FIRST**: First thread has arrived
-- **SECOND**: Second thread has arrived; combining in progress
-- **RESULT**: Result is ready for distribution
-- **ROOT**: Reserved for the root node (never changes)
+---
 
 ## Implementation Details
 
-### CAS-based Synchronization
+- Uses `Atomic.compare_and_set` for synchronization  
+- Avoids locks → no blocking or deadlocks  
+- Tree height ≈ `log₂(number_of_threads)`  
+- One leaf per thread to reduce contention  
 
-The implementation uses OCaml 5's `Atomic` module for lock-free coordination:
-
-```ocaml
-Atomic.compare_and_set node.status IDLE FIRST  (* Try to acquire as FIRST *)
-Atomic.get node.status                         (* Read current status *)
-```
-
-### Thread Coordination Example
-
-When two threads reach the same leaf node:
-
-```
-Thread 0                          Thread 1
-├─ Read: status = IDLE
-├─ CAS: IDLE → FIRST ✓           (reads IDLE, fails CAS)
-│                                ├─ Read: status = FIRST
-│                                ├─ CAS: FIRST → SECOND ✓
-│ (continues ascending)          └─ Waits for result
-├─ Ascends tree...
-├─ Reaches combining node
-├─ Performs op()
-├─ Distributes result ───────────> Wakes up with result
-└─ Returns prior value           └─ Returns result
-```
-
-## References
-
-This implementation is based on the combining tree algorithm from:
-
-- **The Art of Multiprocessor Programming** (3rd Edition)
-  - Chapter 11: Combining Tree for Counting
-  - Authors: Maurice Herlihy, Nir Shavit, Victor Luchangco, Michael Spear
+---
 
 ## Performance Considerations
 
-- Optimal tree height: Log₂(number of threads)
-- For N threads, use a tree of height ≈ log₂(N)
-- Each thread starts at a different leaf to minimize contention
-- The combining tree reduces coordination overhead from O(N) to O(log N)
+- Best performance achieved under high contention  
+- Overhead exists for small workloads  
+- Tree structure reduces contention from **O(N) → O(log N)**  
 
-## Contributing
+---
 
-Contributions are welcome! Please ensure:
-- Code follows OCaml style guidelines
-- All tests pass with `dune test`
-- New features include test coverage
+## Common Issues
+
+### Program not using multiple cores
+```bash
+OCAMLRUNPARAM="D=4" dune exec ...
+```
+
+### Slow benchmark
+- Reduce operations per thread  
+- Adjust domain count  
+
+### Incorrect results
+- Check CAS usage  
+- Ensure atomic updates are correct  
+
+---
+
+## References
+
+- *The Art of Multiprocessor Programming* — Herlihy & Shavit  
+- OCaml 5 Domains Documentation  
+
+---
 
 ## License
 
 MIT
 
-## Questions & Support
+---
 
-For issues or questions about the implementation, please file an issue on GitHub.
+## Author
+
+Project developed as part of a Concurrent Programming course.

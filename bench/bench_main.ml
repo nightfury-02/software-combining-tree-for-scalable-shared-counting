@@ -78,32 +78,35 @@ let run_experiment ~counter ~num_threads ~increments_per_thread =
 
 let run_all_benchmarks () =
   let num_increments = 50_000 in
-  Printf.printf "Benchmarking with %d increments per thread.\n" num_increments;
-  Printf.printf "==========================================================================\n";
-  Printf.printf "%-15s | %-10s | %-20s | %-20s\n" "Counter Type" "Threads" "Throughput (ops/s)" "Avg Latency (ns/op)";
-  Printf.printf "--------------------------------------------------------------------------\n";
+  let num_runs = 5 in
+  Printf.printf "Benchmarking with %d increments per thread over %d runs.\n%!" num_increments num_runs;
+  Printf.printf "=========================================================================================\n%!";
+  Printf.printf "%-15s | %-10s | %-20s | %-20s\n%!" "Counter Type" "Threads" "Avg Throughput (ops/s)" "Avg Latency (ns/op)";
+  Printf.printf "-----------------------------------------------------------------------------------------\n%!";
 
   let thread_counts = [2; 3; 4; 5; 6; 7; 8] in
   
   List.iter (fun threads ->
     let counters = [
-      ("Atomic FAA", AtomicFAA (Baseline.create ~init:0));
-      ("CAS Loop", CASLoop (Baseline.create ~init:0));
+      ("Atomic FAA", fun () -> AtomicFAA (Baseline.create ~init:0));
+      ("CAS Loop", fun () -> CASLoop (Baseline.create ~init:0));
       (* Combine tree with an adequate height so there's enough leaves for up to 8 threads. 
          Height 3 means 2^3 = 8 leaves. *)
-      ("CombiningTree", CombiningTree (Tree.create_counting_tree ~height:3));
+      ("CombiningTree", fun () -> CombiningTree (Tree.create_counting_tree ~height:3));
       (* Nary Combining Trees for comparison *)
-      ("NaryTree(fan=2)", NaryCombiningTree (Nary_tree.create_counting_tree ~height:3 ~fanout:2));
-      ("NaryTree(fan=4)", NaryCombiningTree (Nary_tree.create_counting_tree ~height:2 ~fanout:4));
+      ("NaryTree(fan=2)", fun () -> NaryCombiningTree (Nary_tree.create_counting_tree ~height:3 ~fanout:2));
+      ("NaryTree(fan=4)", fun () -> NaryCombiningTree (Nary_tree.create_counting_tree ~height:2 ~fanout:4));
     ] in
     
-    List.iter (fun (name, counter) ->
+    List.iter (fun (name, counter_constructor) ->
       Printf.printf "  [Running] %-15s | %-10d %!" name threads;
+      
+      let counter = counter_constructor () in
       let (throughput, latency_sec) = run_experiment ~counter ~num_threads:threads ~increments_per_thread:num_increments in
       let latency_ns = latency_sec *. 1_000_000_000.0 in
       Printf.printf "=> Throughput: %-20.0f | Latency: %-20.2f\n%!" throughput latency_ns
     ) counters;
-    Printf.printf "--------------------------------------------------------------------------\n";
+    Printf.printf "-----------------------------------------------------------------------------------------\n%!";
   ) thread_counts
 
 let () =

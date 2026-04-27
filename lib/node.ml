@@ -1,41 +1,40 @@
 open Types
 
-(** N-ary node operations for the combining tree *)
-
-(** Precombine phase: lock-free via CAS with spin loop *)
 let rec precombine node =
   let s = Atomic.get node.status in
-  if s = 0 then begin
-    (* Try to become the Combiner (index 0) *)
-    if Atomic.compare_and_set node.status 0 1 then
-      (true, 0)
-    else
+  match s with
+  | IDLE ->
+      if Atomic.compare_and_set node.status IDLE FIRST then (true, 0)
+      else precombine node
+  | FIRST when node.fanout > 1 ->
+      if Atomic.compare_and_set node.status FIRST SECOND then (false, 1)
+      else precombine node
+  | SECOND when node.fanout > 2 ->
+      if Atomic.compare_and_set node.status SECOND THIRD then (false, 2)
+      else precombine node
+  | THIRD when node.fanout > 3 ->
+      if Atomic.compare_and_set node.status THIRD FOURTH then (false, 3)
+      else precombine node
+  | _ ->
+      Domain.cpu_relax ();
       precombine node
-  end else if s > 0 && s < node.fanout then begin
-    (* Try to join as Follower *)
-    let s_new = s + 1 in
-    if Atomic.compare_and_set node.status s s_new then
-      (false, s) (* Return index = s (since it's 0-indexed, meaning if 1 joined, index is 1) *)
-    else
-      precombine node
-  end else begin
-    (* Status is either LOCKED (-1) or RESULT (-2) or completely full. Spin and retry. *)
-    Domain.cpu_relax ();
-    precombine node
-  end
 
-(** Combiner tries to lock the node, preventing more joins. *)
 let rec lock_for_combine node =
   let s = Atomic.get node.status in
-  if s > 0 then begin
-    if Atomic.compare_and_set node.status s (-1) then s
-    else lock_for_combine node
-  end else begin
-    Domain.cpu_relax ();
-    lock_for_combine node
-  end
+  match s with
+  | FIRST | SECOND | THIRD | FOURTH ->
+      if Atomic.compare_and_set node.status s LOCKED then
+        match s with
+        | FIRST -> 1
+        | SECOND -> 2
+        | THIRD -> 3
+        | FOURTH -> 4
+        | _ -> assert false
+      else lock_for_combine node
+  | _ ->
+      Domain.cpu_relax ();
+      lock_for_combine node
 
-(** Wait for a specific follower to deposit its value *)
 let rec wait_for_value node index =
   match Atomic.get node.values.(index) with
   | Some v -> v
@@ -43,9 +42,8 @@ let rec wait_for_value node index =
       Domain.cpu_relax ();
       wait_for_value node index
 
-(** Wait for the combiner to deliver results *)
 let rec wait_for_result node =
-  if Atomic.get node.status <> -2 then begin
+  if Atomic.get node.status <> RESULT then begin
     Domain.cpu_relax ();
     wait_for_result node
   end

@@ -5,7 +5,7 @@ module CT = Combining_tree.Tree
 module CTSig = struct
   type t = int CT.t
 
-  let init () = CT.create_counting_tree ~height:3
+  let init () = CT.create_counting_tree ~height:3 ~fanout:2
 
   let cleanup _ = ()
 

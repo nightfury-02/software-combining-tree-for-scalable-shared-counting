@@ -1,92 +1,64 @@
 # Software Combining Tree for Scalable Shared Counting
 
-A lock-free, concurrent implementation of a **Software Combining Tree** in **OCaml 5**, designed to reduce contention in shared counters using hierarchical aggregation, atomic synchronization, and tunable fan-out structures.
+Shared counters are a deceptively simple concurrent object: every thread wants to `fetchAndIncrement`. Under high contention, even a single Atomic counter becomes a bottleneck as every CAS triggers a cache-line invalidation broadcast across your multiple cores. 
+
+As presented in *The Art of Multiprocessor Programming* (AoMPP Chapter 12), the **software combining tree** is an elegant alternative to this problem: threads are arranged at the leaves of a binary tree and combine their increments as they move up. At each internal node, the first thread to arrive waits; the second thread to arrive combines both increments into one, carries the combined value up the tree, and on the way back down distributes the results. Only one CAS reaches the root per pair of concurrent increments, dynamically reducing contention from `O(n)` to `O(log n)`. 
+
+This OCaml 5 implementation generalizes the combining tree beyond counting, supporting arbitrary associative combining functions (`'a -> 'a -> 'a`) like max-finding, and features dynamically configurable internal *Fan-out* structures to study architectural scaling.
 
 ---
 
-## Overview
+## Features Implemented
 
-In concurrent systems, shared counters become performance bottlenecks due to contention among threads. This project implements a **combining tree**, where threads dynamically group and aggregate operations across a generalized tree structure before applying them to the shared root value. 
-
-### Why Combine?
-By utilizing a Fan-out 4 vs Fan-out 2 structure, internal tree coordination delays are slashed, providing massive latency reductions under contention while effortlessly bypassing Intel's physical hardware interconnect limitations once threads exceed the optimal single-cache-line limit!
-
-The implementation uses:
-- **OCaml 5 Domains** for multi-core true parallel execution
-- **CAS (Compare-And-Swap)** for lock-free synchronization without deadlocks
-- A **Dynamic Fan-out Parameter** allowing deep analysis into combining node widths
-- A **generic associative function** (`'a -> 'a -> 'a`) for flexible aggregation
+- **OCaml 5 Native Parallelism**: Built on modern Domains for true multi-core mapping.
+- **Strict AoMPP Node States**: Tracks transitions cleanly `(IDLE, FIRST, SECOND, RESULT, ROOT)`.
+- **Generalized Operations**: Supports completely associative combine algorithms.
+- **Tunable Topology**: Constructs complete binary `fan-out 2` or wider `fan-out 4` hierarchies.
+- **Validation Matrices**: Hardened against race conditions natively through QCheck-Lin.
 
 ---
 
-## Setup & Build Instructions
+## Build and Execute
 
-Ensure the following are installed:
-- OCaml **5.0+**
-- Dune **3.0+**
+Ensure OCaml 5.0+ and Dune 3.0+ are installed. OCaml 5 automatically schedules Domains across your physical machine cores gracefully, so you don't need arbitrary core-assignment flags!
 
+### Compilation
 ```bash
-git clone https://github.com/nightfury-02/software-combining-tree-for-scalable-shared-counting.git
-cd software-combining-tree-for-scalable-shared-counting
 dune build
 ```
 
----
+### Running the Test Suite (Including Max-Finding)
+To spin up the native test suite covering structure boundaries, single-thread validation, and maximum-stress concurrency:
+```bash
+dune exec test/test_runner.exe
+```
 
-## Benchmarking Performance
+### Running QCheck-Lin & TSAN Validation
+To formally verify linearizability against random permutations:
+```bash
+dune runtest
+```
 
-To rigorously execute the configured benchmarking framework, run the executable directly (to avoid Dune wrapper stdout buffering under heavy scaling conditions):
-
+### Benchmarking Profiles
+To trace the operational limits of generic arrays against Atomic FAA and CAS Loops:
 ```bash
 dune build bench/bench_main.exe && ./_build/default/bench/bench_main.exe
 ```
 
-### OCaml 5 Core Utilization Note
-OCaml 5 domains naturally map onto physical hardware CPU cores globally out-of-the-box. You **do not** need to export deprecated flags like `OCAMLRUNPARAM="D=4"` (which were native to old pre-release Multicore variants). OCaml handles thread balancing gracefully across the operating system.
-
-### Expected Output
-The framework averages metrics over 5 concurrent scaling cycles, comparing Hardware FAA against the Native generic Combining Tree at Fan-outs of 2 and 4. You will see scaling profiles that mirror memory contention breaking thresholds.
-
 ---
 
-## Project Structure
+## Project Layout
 
 ```
 software-combining-tree/
 ├── bench/
-│   ├── bench_main.ml     # Iterative driver comparing cross-fanout tree performance
-│   └── dune
+│   └── bench_main.ml     # Execution driver for cross-architecture topology speedouts
 ├── lib/
-│   ├── types.ml          # Atomic core structural definitions 
-│   ├── node.ml           # State machine logic (PRECOMBINE, LOCK, RESULT)
-│   ├── tree.ml           # Tree ASCEND and DESCEND aggregation loop algorithms
-│   ├── tree.mli
-│   ├── node.mli
-│   ├── baseline.ml
-│   └── dune
+│   ├── types.ml          # Strict assignment enum states and node tracking
+│   ├── node.ml           # State machine transitions (precombine, lock)
+│   ├── tree.ml           # Tree ascending grouping and payload descent distribution
+│   └── baseline.ml       # Standard loop and fetching counters
 └── test/
-    ├── test_runner.ml
-    ├── qcheck_lin_combining_tree.ml
-    └── dune
+    ├── test_runner.ml    # Sequential and concurrent load matrices (plus max-testing)
+    └── qcheck_lin_combining_tree.ml # Linearizability execution module
 ```
-
----
-
-## Algorithm Details
-
-Each operation dynamically progresses across dynamic leaf branches:
-
-1. **Precombine (Ascend)**
-   - A thread arrives at a combining node and attempts to join via CAS loops.
-   - The *first* thread instantly locks the node as the `Combiner`.
-   - Threads arriving immediately after become `Followers`.
-2. **Combine**
-   - The Combiner waits to collect inputs from all registered followers.
-   - The group value is aggregated into a single payload, traversing upwards.
-3. **Distribution**
-   - After the root applies the unified total, the Combiner descends.
-   - Results are precisely distributed to each distinct follower's memory array slot.
-   - The node safely unlocks, opening itself for the next round of combinations.
-
-## License
-MIT

@@ -42,8 +42,9 @@ dune runtest
 ### Benchmarking Profiles
 To trace the operational limits of generic arrays against Atomic FAA and CAS Loops:
 ```bash
-dune build bench/bench_main.exe && ./_build/default/bench/bench_main.exe
+dune exec bench/bench_main.exe
 ```
+*(Note: Using `dune exec` routes your output through Dune's compiler buffers. The output matrix will appear on screen all at once when the script finishes its execution averages!)*
 
 ---
 

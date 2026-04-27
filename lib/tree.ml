@@ -1,118 +1,129 @@
 open Types
-
-(** Tree construction and generic combine logic for the combining tree *)
+open Node
 
 type 'a t = {
   root : 'a node;
   leaves : 'a node array;
   nodes : 'a node array;
   combine : 'a -> 'a -> 'a;
+  fanout : int;
 }
 
-(** Create a node with optional ROOT status *)
-let create_node is_root init : 'a node =
+let create_node fanout init : 'a node =
   {
-    status = Atomic.make (if is_root then ROOT else IDLE);
-    first_value = Atomic.make None;
-    second_value = Atomic.make None;
+    status = Atomic.make 0;
+    depart_count = Atomic.make 0;
+    joined_count = Atomic.make 0;
+    values = Array.init fanout (fun _ -> Atomic.make None);
+    results = Array.init fanout (fun _ -> Atomic.make None);
     result = Atomic.make init;
     parent = None;
-    left = None;
-    right = None;
+    children = [||];
+    fanout;
   }
 
-(** Create a tree with given height *)
-let rec create_tree_internal height parent is_root init : 'a node =
-  let node = create_node is_root init in
+let rec create_tree_internal height fanout parent init : 'a node =
+  let node = create_node fanout init in
   node.parent <- parent;
   if height > 0 then begin
-    let left = create_tree_internal (height - 1) (Some node) false init in
-    let right = create_tree_internal (height - 1) (Some node) false init in
-    node.left <- Some left;
-    node.right <- Some right
+    let children = Array.init fanout (fun _ -> create_tree_internal (height - 1) fanout (Some node) init) in
+    node.children <- children
   end;
   node
 
 let rec collect_leaves node =
-  match (node.left, node.right) with
-  | None, None -> [ node ]
-  | Some l, Some r -> collect_leaves l @ collect_leaves r
-  | _ -> invalid_arg "Tree.collect_leaves: malformed tree"
+  if Array.length node.children = 0 then [node]
+  else Array.fold_left (fun acc c -> acc @ collect_leaves c) [] node.children
 
 let rec collect_nodes node =
-  match (node.left, node.right) with
-  | None, None -> [ node ]
-  | Some l, Some r -> node :: (collect_nodes l @ collect_nodes r)
-  | _ -> invalid_arg "Tree.collect_nodes: malformed tree"
+  if Array.length node.children = 0 then [node]
+  else node :: Array.fold_left (fun acc c -> acc @ collect_nodes c) [] node.children
 
-let create_tree ~height ~init ~combine : 'a t =
-  if height < 0 then
-    invalid_arg "Tree.create_tree: height must be >= 0";
-  let root = create_tree_internal height None true init in
+let create_tree ~height ~fanout ~init ~combine : 'a t =
+  if height < 0 then invalid_arg "Tree: height must be >= 0";
+  if fanout < 1 then invalid_arg "Tree: fanout must be >= 1";
+  let root = create_tree_internal height fanout None init in
   {
     root;
     leaves = Array.of_list (collect_leaves root);
     nodes = Array.of_list (collect_nodes root);
     combine;
+    fanout;
   }
 
-let root t = t.root
 let leaves t = t.leaves
+let root t = t.root
 let nodes t = t.nodes
 
 let fetch_and_combine t ~start value =
   let rec ascend node current_val stack =
-    let is_first = Node.precombine node in
-    if is_first then begin
-      if node.parent = None then begin
-        let stack = (node, true, false, current_val) :: stack in
-        (stack, current_val)
+    let (is_combiner, index) = Node.precombine node in
+    if is_combiner then begin
+      let count = Node.lock_for_combine node in
+      let follower_values = Array.make (count - 1) current_val in
+      for i = 1 to count - 1 do
+        follower_values.(i - 1) <- Node.wait_for_value node i
+      done;
+      let total_val = ref current_val in
+      for i = 0 to count - 2 do
+        total_val := t.combine !total_val follower_values.(i)
+      done;
+      let is_root = (node.parent = None) in
+      if is_root then begin
+        let rec atomic_combine () =
+          let old = Atomic.get node.result in
+          let next = t.combine old !total_val in
+          if Atomic.compare_and_set node.result old next then old
+          else begin Domain.cpu_relax (); atomic_combine () end
+        in
+        let prior = atomic_combine () in
+        let stack = (node, count, current_val, follower_values) :: stack in
+        (stack, prior)
       end else begin
-        if Atomic.compare_and_set node.status FIRST IDLE then begin
-          let stack = (node, true, false, current_val) :: stack in
-          ascend (Option.get node.parent) current_val stack
-        end else begin
-          let rec wait_for_sec () =
-            match Atomic.get node.second_value with
-            | Some v -> v
-            | None -> Domain.cpu_relax (); wait_for_sec ()
-          in
-          let sec = wait_for_sec () in
-          let combined = t.combine current_val sec in
-          let stack = (node, true, true, current_val) :: stack in
-          ascend (Option.get node.parent) combined stack
-        end
+        let stack = (node, count, current_val, follower_values) :: stack in
+        ascend (Option.get node.parent) !total_val stack
       end
     end else begin
-      Atomic.set node.second_value (Some current_val);
-      let stack = (node, false, false, current_val) :: stack in
-      (stack, current_val)
+      Atomic.set node.values.(index) (Some current_val);
+      Node.wait_for_result node;
+      let prior =
+        match Atomic.get node.results.(index) with
+        | Some v -> v
+        | None -> assert false
+      in
+      let left = Atomic.fetch_and_add node.depart_count 1 in
+      let total_followers = (Atomic.get node.joined_count) - 1 in
+      if left + 1 = total_followers then begin
+        Atomic.set node.depart_count 0;
+        Atomic.set node.status 0;
+      end;
+      (stack, prior)
     end
   in
-  let (stack, final_val) = ascend start value [] in
-
-  let (top_node, _, _, _) = List.hd stack in
-  let root_prior = Node.op t.combine top_node final_val in
+  let (stack, prior_from_top) = ascend start value [] in
 
   let rec descend prior stack =
     match stack with
     | [] -> prior
-    | (node, is_first, has_second, my_val) :: rest ->
-        if is_first then begin
-          if has_second then begin
-            let t2_res = t.combine prior my_val in
-            Atomic.set node.result t2_res;
-            Atomic.set node.second_value None;
-            Atomic.set node.status RESULT;
-            descend prior rest
-          end else begin
-            descend prior rest
-          end
+    | (node, count, my_val, follower_values) :: rest ->
+        Atomic.set node.joined_count count;
+        Atomic.set node.results.(0) (Some prior);
+        let current_prior = ref (t.combine prior my_val) in
+        for i = 1 to count - 1 do
+          Atomic.set node.results.(i) (Some !current_prior);
+          current_prior := t.combine !current_prior follower_values.(i - 1)
+        done;
+        for i = 1 to count - 1 do
+          Atomic.set node.values.(i) None
+        done;
+        if count = 1 then begin
+          Atomic.set node.status 0
         end else begin
-          descend prior rest
-        end
+          Atomic.set node.status (-2)
+        end;
+        descend prior rest
   in
-  descend root_prior stack
+  descend prior_from_top stack
 
-let create_counting_tree ~height = create_tree ~height ~init:0 ~combine:( + )
+let create_counting_tree ~height ~fanout = create_tree ~height ~fanout ~init:0 ~combine:( + )
 let fetch_and_increment t ~start = fetch_and_combine t ~start 1

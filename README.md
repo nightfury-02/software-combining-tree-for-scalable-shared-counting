@@ -1,228 +1,92 @@
 # Software Combining Tree for Scalable Shared Counting
 
-A lock-free, concurrent implementation of a **Software Combining Tree** in **OCaml 5**, designed to reduce contention in shared counters using hierarchical aggregation and atomic synchronization.
+A lock-free, concurrent implementation of a **Software Combining Tree** in **OCaml 5**, designed to reduce contention in shared counters using hierarchical aggregation, atomic synchronization, and tunable fan-out structures.
 
 ---
 
 ## Overview
 
-In concurrent systems, shared counters become performance bottlenecks due to contention among threads. This project implements a **combining tree**, where threads aggregate operations across a tree structure before applying them to a shared value. This reduces contention and improves scalability.
+In concurrent systems, shared counters become performance bottlenecks due to contention among threads. This project implements a **combining tree**, where threads dynamically group and aggregate operations across a generalized tree structure before applying them to the shared root value. 
+
+### Why Combine?
+By utilizing a Fan-out 4 vs Fan-out 2 structure, internal tree coordination delays are slashed, providing massive latency reductions under contention while effortlessly bypassing Intel's physical hardware interconnect limitations once threads exceed the optimal single-cache-line limit!
 
 The implementation uses:
-- **OCaml 5 Domains** for parallel execution  
-- **CAS (Compare-And-Swap)** for lock-free synchronization  
-- A **generic associative function** (`'a -> 'a -> 'a`) for flexible aggregation  
+- **OCaml 5 Domains** for multi-core true parallel execution
+- **CAS (Compare-And-Swap)** for lock-free synchronization without deadlocks
+- A **Dynamic Fan-out Parameter** allowing deep analysis into combining node widths
+- A **generic associative function** (`'a -> 'a -> 'a`) for flexible aggregation
 
 ---
 
-## Features
-
-- Lock-free synchronization using atomic operations  
-- Scalable tree-based contention reduction  
-- Generic operation support (sum, max, etc.)  
-- Parallel execution using OCaml Domains  
-- Comprehensive correctness testing  
-- Benchmarking support for performance evaluation  
-
----
-
-## Prerequisites
+## Setup & Build Instructions
 
 Ensure the following are installed:
-
 - OCaml **5.0+**
 - Dune **3.0+**
-- Opam (recommended)
-
-### Setup (Linux)
 
 ```bash
-sudo apt-get install ocaml opam build-essential
-opam switch create 5.0.0
-eval $(opam env)
-```
-
-### Setup (macOS)
-
-```bash
-brew install ocaml opam
-opam switch create 5.0.0
-eval $(opam env)
-```
-
----
-
-## Build Instructions
-
-```bash
-git clone https://github.com/yourusername/combining-tree.git
-cd combining-tree
+git clone https://github.com/nightfury-02/software-combining-tree-for-scalable-shared-counting.git
+cd software-combining-tree-for-scalable-shared-counting
 dune build
 ```
 
 ---
 
-## Running Tests
+## Benchmarking Performance
+
+To rigorously execute the configured benchmarking framework, run the executable directly (to avoid Dune wrapper stdout buffering under heavy scaling conditions):
 
 ```bash
-dune runtest
+dune build bench/bench_main.exe && ./_build/default/bench/bench_main.exe
 ```
 
-Or run directly:
-
-```bash
-dune exec test/test_runner.exe
-```
+### OCaml 5 Core Utilization Note
+OCaml 5 domains naturally map onto physical hardware CPU cores globally out-of-the-box. You **do not** need to export deprecated flags like `OCAMLRUNPARAM="D=4"` (which were native to old pre-release Multicore variants). OCaml handles thread balancing gracefully across the operating system.
 
 ### Expected Output
-
-```
-Software Combining Tree Test Suite
-===================================
-
-[PASS] tree_shape_and_root_status
-[PASS] single_thread_basic
-[PASS] single_thread_long_run
-[PASS] multi_thread_small
-[PASS] multi_thread_medium
-[PASS] high_stress
-
-All tests passed.
-```
-
----
-
-## Benchmarking
-
-### Run Benchmark
-
-```bash
-dune exec bench/ben
-```
-
-### Control Parallelism
-
-```bash
-OCAMLRUNPARAM="D=4" dune exec test/bench.exe
-```
-
----
-
-### Metrics Measured
-
-- Execution time  
-- Throughput (operations/sec)  
-- Scalability vs number of domains  
-
----
-
-### Example Output
-
-```
-Domains: 4
-Operations per domain: 100000
-
-Atomic FAA:        0.12s
-CAS Loop:          0.45s
-Combining Tree:    0.20s
-```
-
----
-
-### Interpretation
-
-- **Atomic FAA** → Best for low contention  
-- **CAS Loop** → Poor performance under contention  
-- **Combining Tree** → Scales better with higher contention  
+The framework averages metrics over 5 concurrent scaling cycles, comparing Hardware FAA against the Native generic Combining Tree at Fan-outs of 2 and 4. You will see scaling profiles that mirror memory contention breaking thresholds.
 
 ---
 
 ## Project Structure
 
 ```
-combining-tree/
-├── dune-project
-├── README.md
+software-combining-tree/
+├── bench/
+│   ├── bench_main.ml     # Iterative driver comparing cross-fanout tree performance
+│   └── dune
 ├── lib/
-│   ├── types.ml
-│   ├── node.ml
-│   ├── tree.ml
+│   ├── types.ml          # Atomic core structural definitions 
+│   ├── node.ml           # State machine logic (PRECOMBINE, LOCK, RESULT)
+│   ├── tree.ml           # Tree ASCEND and DESCEND aggregation loop algorithms
 │   ├── tree.mli
-│   └── combining_tree.mli
+│   ├── node.mli
+│   ├── baseline.ml
+│   └── dune
 └── test/
     ├── test_runner.ml
-    └── bench.ml
+    ├── qcheck_lin_combining_tree.ml
+    └── dune
 ```
 
 ---
 
-## Algorithm Summary
+## Algorithm Details
 
-Each operation follows four phases:
+Each operation dynamically progresses across dynamic leaf branches:
 
 1. **Precombine (Ascend)**
-   - Threads move up the tree
-   - First thread marks node as FIRST
-   - Second thread marks node as SECOND  
-
+   - A thread arrives at a combining node and attempts to join via CAS loops.
+   - The *first* thread instantly locks the node as the `Combiner`.
+   - Threads arriving immediately after become `Followers`.
 2. **Combine**
-   - Values are aggregated at nodes  
-
-3. **Operation**
-   - Root applies combined result  
-
-4. **Distribute (Descend)**
-   - Results propagated back to threads  
-
----
-
-## Implementation Details
-
-- Uses `Atomic.compare_and_set` for synchronization  
-- Avoids locks → no blocking or deadlocks  
-- Tree height ≈ `log₂(number_of_threads)`  
-- One leaf per thread to reduce contention  
-
----
-
-## Performance Considerations
-
-- Best performance achieved under high contention  
-- Overhead exists for small workloads  
-- Tree structure reduces contention from **O(N) → O(log N)**  
-
----
-
-## Common Issues
-
-### Program not using multiple cores
-```bash
-OCAMLRUNPARAM="D=4" dune exec ...
-```
-
-### Slow benchmark
-- Reduce operations per thread  
-- Adjust domain count  
-
-### Incorrect results
-- Check CAS usage  
-- Ensure atomic updates are correct  
-
----
-
-## References
-
-- *The Art of Multiprocessor Programming* — Herlihy & Shavit  
-- OCaml 5 Domains Documentation  
-
----
+   - The Combiner waits to collect inputs from all registered followers.
+   - The group value is aggregated into a single payload, traversing upwards.
+3. **Distribution**
+   - After the root applies the unified total, the Combiner descends.
+   - Results are precisely distributed to each distinct follower's memory array slot.
+   - The node safely unlocks, opening itself for the next round of combinations.
 
 ## License
-
 MIT
-
----
-
-## Author
-
-Project developed as part of a Concurrent Programming course.

@@ -4,7 +4,6 @@ type counter_type =
   | AtomicFAA of Baseline.counter
   | CASLoop of Baseline.counter
   | CombiningTree of int Tree.t
-  | NaryCombiningTree of int Nary_tree.t
 
 let run_experiment ~counter ~num_threads ~increments_per_thread =
   let barrier = Atomic.make 0 in
@@ -23,22 +22,16 @@ let run_experiment ~counter ~num_threads ~increments_per_thread =
       | CombiningTree tree -> Some (Array.get (Tree.leaves tree) (thread_id mod Array.length (Tree.leaves tree)))
       | _ -> None
     in
-    let nary_leaf_node =
-      match counter with
-      | NaryCombiningTree tree -> Some (Array.get (Nary_tree.leaves tree) (thread_id mod Array.length (Nary_tree.leaves tree)))
-      | _ -> None
-    in
 
     let t_start_global = Unix.gettimeofday () in
 
     for _ = 1 to increments_per_thread do
       let t0 = Unix.gettimeofday () in
       let _res =
-        match counter, leaf_node, nary_leaf_node with
-        | AtomicFAA c, _, _ -> Baseline.fetch_and_increment_atomic c
-        | CASLoop c, _, _ -> Baseline.fetch_and_increment_cas_loop c
-        | CombiningTree tree, Some start_node, _ -> Tree.fetch_and_increment tree ~start:start_node
-        | NaryCombiningTree tree, _, Some start_node -> Nary_tree.fetch_and_increment tree ~start:start_node
+        match counter, leaf_node with
+        | AtomicFAA c, _ -> Baseline.fetch_and_increment_atomic c
+        | CASLoop c, _ -> Baseline.fetch_and_increment_cas_loop c
+        | CombiningTree tree, Some start_node -> Tree.fetch_and_increment tree ~start:start_node
         | _ -> assert false
       in
       let t1 = Unix.gettimeofday () in
@@ -90,12 +83,8 @@ let run_all_benchmarks () =
     let counters = [
       ("Atomic FAA", fun () -> AtomicFAA (Baseline.create ~init:0));
       ("CAS Loop", fun () -> CASLoop (Baseline.create ~init:0));
-      (* Combine tree with an adequate height so there's enough leaves for up to 8 threads. 
-         Height 3 means 2^3 = 8 leaves. *)
-      ("CombiningTree", fun () -> CombiningTree (Tree.create_counting_tree ~height:3));
-      (* Nary Combining Trees for comparison *)
-      ("NaryTree(fan=2)", fun () -> NaryCombiningTree (Nary_tree.create_counting_tree ~height:3 ~fanout:2));
-      ("NaryTree(fan=4)", fun () -> NaryCombiningTree (Nary_tree.create_counting_tree ~height:2 ~fanout:4));
+      ("CombiningTree(fan=2)", fun () -> CombiningTree (Tree.create_counting_tree ~height:3 ~fanout:2));
+      ("CombiningTree(fan=4)", fun () -> CombiningTree (Tree.create_counting_tree ~height:2 ~fanout:4));
     ] in
     
     List.iter (fun (name, counter_constructor) ->

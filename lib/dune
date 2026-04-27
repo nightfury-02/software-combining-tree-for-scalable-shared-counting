@@ -1,4 +1,4 @@
 (library
  (name combining_tree)
- (modules types node tree baseline nary_types nary_node nary_tree)
+ (modules types node tree baseline)
  (flags (:standard -w -58)))

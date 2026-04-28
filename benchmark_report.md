@@ -8,20 +8,20 @@ We rigorously evaluated all designs—Atomic FAA, CAS Loop, and the Combining Tr
 
 | Counter Design       | Threads | Avg Throughput (ops/s) | Avg Latency (ns/op) |
 |----------------------|---------|-----------------------:|--------------------:|
-| **Atomic FAA**       | 2       | 2,751,572              | 334.66              |
-| **CAS Loop**         | 2       | 4,097,160              | 247.46              |
-| **Combining (f=2)**  | 2       |   550,436              | 2,960.08            |
-| **Combining (f=4)**  | 2       |   769,391              | 2,469.58            |
+| **Atomic FAA**       | 2       | 5,630,241              | 258.29              |
+| **CAS Loop**         | 2       | 6,294,540              | 243.09              |
+| **Combining (f=2)**  | 2       | 1,955,067              | 948.66              |
+| **Combining (f=4)**  | 2       | 1,760,596              | 1,062.13            |
 |                      |         |                        |                     |
-| **Atomic FAA**       | 4       | 5,412,878              | 334.81              |
-| **CAS Loop**         | 4       | 4,610,848              | 383.91              |
-| **Combining (f=2)**  | 4       |   549,410              | 6,557.75            |
-| **Combining (f=4)**  | 4       |   716,373              | 4,759.56            |
+| **Atomic FAA**       | 4       | 17,008,187             | 185.75              |
+| **CAS Loop**         | 4       | 9,067,785              | 393.02              |
+| **Combining (f=2)**  | 4       | 2,651,216              | 1,467.73            |
+| **Combining (f=4)**  | 4       | 2,747,175              | 1,346.95            |
 |                      |         |                        |                     |
-| **Atomic FAA**       | 8       | 7,581,518              | 369.83              |
-| **CAS Loop**         | 8       | 4,661,296              | 831.15              |
-| **Combining (f=2)**  | 8       |   755,632              | 9,226.67            |
-| **Combining (f=4)**  | 8       | 1,047,337              | 6,196.57            |
+| **Atomic FAA**       | 8       | 32,862,351             | 147.01              |
+| **CAS Loop**         | 8       | 7,754,198              | 953.67              |
+| **Combining (f=2)**  | 8       | 3,342,441              | 2,163.28            |
+| **Combining (f=4)**  | 8       | 3,146,408              | 2,364.00            |
 
 ### Baseline Performance: Why FAA and CAS Win Initially
 Software combining trees are inherently specialized algorithms designed for massive-scale architectures. Between 2 and 8 physical cores, hardware limit boundaries for single cache-lines are rarely completely saturated. 

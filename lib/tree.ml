@@ -87,8 +87,8 @@ let fetch_and_combine t ~start value =
           | Some v -> v
           | None -> assert false
         in
-        let left = Atomic.fetch_and_add node.depart_count 1 in
         let total_followers = (Atomic.get node.joined_count) - 1 in
+        let left = Atomic.fetch_and_add node.depart_count 1 in
         if left + 1 = total_followers then begin
           Atomic.set node.depart_count 0;
           Atomic.set node.status IDLE;

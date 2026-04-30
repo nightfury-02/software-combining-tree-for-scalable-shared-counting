@@ -16,30 +16,20 @@ let run_experiment ~counter ~num_threads ~increments_per_thread =
       Domain.cpu_relax ()
     done;
 
-    let total_latency = ref 0.0 in
     let leaf_node =
       match counter with
       | CombiningTree tree -> Some (Array.get (Tree.leaves tree) (thread_id mod Array.length (Tree.leaves tree)))
       | _ -> None
     in
 
-    let t_start_global = Unix.gettimeofday () in
-
     for _ = 1 to increments_per_thread do
-      let t0 = Unix.gettimeofday () in
-      let _res =
-        match counter, leaf_node with
-        | AtomicFAA c, _ -> Baseline.fetch_and_increment_atomic c
-        | CASLoop c, _ -> Baseline.fetch_and_increment_cas_loop c
-        | CombiningTree tree, Some start_node -> Tree.fetch_and_increment tree ~start:start_node
-        | _ -> assert false
-      in
-      let t1 = Unix.gettimeofday () in
-      total_latency := !total_latency +. (t1 -. t0)
-    done;
-
-    let t_end_global = Unix.gettimeofday () in
-    (t_end_global -. t_start_global, !total_latency)
+      ignore
+        (match counter, leaf_node with
+         | AtomicFAA c, _ -> Baseline.fetch_and_increment_atomic c
+         | CASLoop c, _ -> Baseline.fetch_and_increment_cas_loop c
+         | CombiningTree tree, Some start_node -> Tree.fetch_and_increment tree ~start:start_node
+         | _ -> assert false)
+    done
   in
 
   let domains =
@@ -51,20 +41,18 @@ let run_experiment ~counter ~num_threads ~increments_per_thread =
     Domain.cpu_relax ()
   done;
 
-  (* Signal them to start concurrently *)
+  (* Start timing, then release all domains concurrently. *)
+  let t_start = Unix.gettimeofday () in
   Atomic.set start_flag true;
 
   (* Wait for them all to finish and gather times *)
-  let results = List.map Domain.join domains in
-
-  (* Throughput calculation: maximum thread duration is a good proxy, or just wall-clock from start_flag to join.
-     Let's do wall-clock across the entire parallel section roughly. *)
-  let max_duration = List.fold_left (fun acc (d, _) -> max acc d) 0.0 results in
-  let sum_total_latency = List.fold_left (fun acc (_, l) -> acc +. l) 0.0 results in
+  List.iter Domain.join domains;
+  let t_end = Unix.gettimeofday () in
+  let duration = max 1e-12 (t_end -. t_start) in
   
   let total_increments = float_of_int (num_threads * increments_per_thread) in
-  let throughput = total_increments /. max_duration in
-  let avg_latency = sum_total_latency /. total_increments in
+  let throughput = total_increments /. duration in
+  let avg_latency = duration /. total_increments in
 
   (throughput, avg_latency)
 
@@ -90,10 +78,19 @@ let run_all_benchmarks () =
     List.iter (fun (name, counter_constructor) ->
       Printf.printf "  [Running] %-15s | %-10d %!" name threads;
       
-      let counter = counter_constructor () in
-      let (throughput, latency_sec) = run_experiment ~counter ~num_threads:threads ~increments_per_thread:num_increments in
-      let latency_ns = latency_sec *. 1_000_000_000.0 in
-      Printf.printf "=> Throughput: %-20.0f | Latency: %-20.2f\n%!" throughput latency_ns
+      let sum_throughput = ref 0.0 in
+      let sum_latency_sec = ref 0.0 in
+      for _run = 1 to num_runs do
+        let counter = counter_constructor () in
+        let (throughput, latency_sec) =
+          run_experiment ~counter ~num_threads:threads ~increments_per_thread:num_increments
+        in
+        sum_throughput := !sum_throughput +. throughput;
+        sum_latency_sec := !sum_latency_sec +. latency_sec
+      done;
+      let avg_throughput = !sum_throughput /. float_of_int num_runs in
+      let avg_latency_ns = (!sum_latency_sec /. float_of_int num_runs) *. 1_000_000_000.0 in
+      Printf.printf "=> Throughput: %-20.0f | Latency: %-20.2f\n%!" avg_throughput avg_latency_ns
     ) counters;
     Printf.printf "-----------------------------------------------------------------------------------------\n%!";
   ) thread_counts

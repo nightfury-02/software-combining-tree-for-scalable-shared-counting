@@ -8,6 +8,13 @@ This OCaml 5 implementation generalizes the combining tree beyond counting, supp
 
 ---
 
+
+## Presentation Video
+
+- `https://youtu.be/Sqh8m_soEH0`
+
+---
+
 ## Features Implemented
 
 - **OCaml 5 Native Parallelism**: Built on modern Domains for true multi-core mapping.
@@ -63,7 +70,3 @@ software-combining-tree/
     ├── test_runner.ml    # Sequential and concurrent load matrices (plus max-testing)
     └── qcheck_lin_combining_tree.ml # Linearizability execution module
 ```
-
-## Presentation Video
-
-- `https://youtu.be/Sqh8m_soEH0`

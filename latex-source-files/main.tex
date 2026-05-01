@@ -1,0 +1,674 @@
+\documentclass[11pt,a4paper]{article}
+
+% -----------------------------------------------------------------------------
+% CS6868 Research Mini-Project Report Template
+% -----------------------------------------------------------------------------
+% Target length: 5-10 pages (including figures, excluding references).
+% Compile with: latexmk -pdf main.tex
+% -----------------------------------------------------------------------------
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=blue!60!black,
+  urlcolor=blue!60!black,
+}
+
+% --- Listings style (for code snippets) ---------------------------------------
+\definecolor{codegray}{gray}{0.95}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codegray},
+  frame=single,
+  framesep=4pt,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+}
+
+% --- Title block --------------------------------------------------------------
+\title{%
+  \textbf{CS6868 Research Mini-Project} \\[0.3em]
+  \Large Software Combining Tree for Scalable Shared Counting%
+}
+\author{%
+  Ravirala Sreevasthav \\ \texttt{cs22b038@smail.iitm.ac.in}
+  \and
+  Gurrala Abhishek \\ \texttt{cs22b049@smail.iitm.ac.in}
+  \and
+  Muchala Sri Charith \\ \texttt{cs22b052@smail.iitm.ac.in}
+}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This project explores the implementation and evaluation of a scalable concurrent aggregation structure supporting generic operations such as addition and maximum. Traditional synchronization mechanisms such as atomic fetch-and-add (FAA) and compare-and-swap (CAS) suffer from contention when multiple threads attempt to update a shared variable, leading to performance degradation. The combining tree addresses this limitation by organizing threads hierarchically and aggregating operations before updating the global counter.
+A complete implementation of the combining tree with configurable fan-out was developed and tested using a comprehensive correctness suite, where all tests passed successfully . Performance evaluation was conducted against atomic FAA and CAS-based counters across varying thread counts. The updated results show significantly improved performance for all approaches, with atomic FAA achieving extremely high throughput due to hardware optimizations. The combining tree demonstrates clear scalability benefits, outperforming CAS at higher thread counts while maintaining stable latency.
+The results confirm that combining trees effectively reduces contention through hierarchical aggregation, although they still incur overhead compared to hardware-optimized atomic operations. The study highlights the trade-offs between contention reduction and structural overhead in concurrent system design.
+\end{abstract}
+
+% =============================================================================
+\section{Goals}
+\label{sec:goals}
+% =============================================================================
+
+The goal of this project was to design and evaluate a \textbf{scalable concurrent counter} using a \textbf{software combining tree}, and compare its performance with traditional synchronization techniques.
+
+\subsection{Objectives}
+\begin{itemize}
+    \item implement a generalized combining tree supporting aggregation operations (e.g., addition, maximum)
+    \item Compare it with:
+    \begin{itemize}
+        \item Atomic Fetch-and-Add (FAA)
+        \item CAS-based counter
+    \end{itemize}
+    \item Analyze scalability with increasing threads
+    \item Understand performance trade-offs
+\end{itemize}
+
+\subsection{Motivation}
+Shared counters are widely used in concurrent systems but suffer from:
+\begin{itemize}
+    \item High contention on a single memory location
+    \item Cache coherence overhead
+    \item Reduced scalability
+\end{itemize}
+The combining tree reduces contention by:
+\begin{itemize}
+    \item Distributing updates across nodes
+    \item Combining multiple operations
+    \item Reducing root-level synchronization
+\end{itemize}
+
+\subsection{Research Question}
+
+\textbf{At what thread count does the combining tree's $O(\log n)$ contention advantage overcome its per-operation coordination overhead compared to a simple \texttt{fetch\_and\_add}, and how does tree fan-out affect the crossover point?}
+
+% =============================================================================
+\section{Background}
+\label{sec:background}
+% =============================================================================
+
+A software combining tree is a hierarchical structure that reduces contention by combining multiple operations before applying them to a shared resource.
+
+\subsection{Detailed Algorithm Explanation}
+
+The combining tree organizes threads in a structured hierarchy where synchronization and aggregation occur progressively as threads move toward the root.
+
+\subsubsection*{Thread Execution Process}
+
+When a thread performs an increment operation, it interacts with the tree in multiple stages:
+
+\subsubsection*{1. Entry and Upward Movement}
+
+Each thread begins at a designated leaf node. Instead of directly updating the shared counter, it attempts to move upward in the tree. At each node:
+
+\begin{itemize}
+    \item The thread checks whether another thread has already arrived.
+    \item If it is the first thread:
+    \begin{itemize}
+        \item It temporarily waits at that node.
+    \end{itemize}
+    \item If it is the second thread:
+    \begin{itemize}
+        \item It combines its increment with the waiting thread’s value.
+        \item A single thread proceeds upward carrying the combined value.
+    \end{itemize}
+\end{itemize}
+
+This process ensures:
+\begin{itemize}
+    \item Multiple operations are merged early
+    \item Fewer threads reach higher levels
+\end{itemize}
+
+\subsubsection*{2. Hierarchical Aggregation}
+
+As threads move upward:
+\begin{itemize}
+    \item The number of active threads decreases
+    \item The size of combined updates increases
+\end{itemize}
+Each node acts as a \textbf{filter}, reducing contention by:
+\begin{itemize}
+    \item Limiting the number of threads progressing upward
+    \item Aggregating multiple operations into one
+\end{itemize}
+This significantly reduces pressure on the root node.
+
+\subsubsection*{3. Root Update}
+
+At the root:
+\begin{itemize}
+    \item A thread performs a single update using the combined value
+    \item This represents the aggregated work of multiple threads
+\end{itemize}
+Thus:
+\begin{itemize}
+    \item The number of global updates is reduced
+    \item Cache coherence overhead is minimized
+\end{itemize}
+
+\subsubsection*{4. Downward Propagation}
+
+After updating the root:
+\begin{itemize}
+    \item The result is propagated back down
+    \item Waiting threads receive their results
+\end{itemize}
+This ensures:
+\begin{itemize}
+    \item Correctness for each thread
+    \item Consistent system state
+\end{itemize}
+
+\subsection{Key Properties}
+
+\begin{itemize}
+    \item Linearizable execution
+    \item No lost updates
+    \item Deadlock-free synchronization
+\end{itemize}
+
+\subsection{Trade-offs}
+
+\begin{itemize}
+    \item Higher latency due to traversal
+    \item Reduced contention at high concurrency
+\end{itemize}
+
+% Example listing:
+% \begin{lstlisting}[language=caml,caption={Sketch of the algorithm.},label={lst:algo}]
+% let foo x = ...
+% \end{lstlisting}
+
+% =============================================================================
+\section{Tasks Undertaken}
+\label{sec:tasks}
+% =============================================================================
+This section describes the work carried out in the project, including the design and implementation of the software combining tree structure, as well as the testing and verification techniques used to ensure correctness and robustness. The tasks were divided into two major components: implementation and testing/verification.
+
+\subsection*{3.1 Implementation}
+
+The primary task of this project was to implement a scalable concurrent aggregation structure using the software combining tree technique. The goal was to design a system that allows multiple threads to perform aggregation operations efficiently while minimizing contention on shared memory.
+
+\subsubsection*{Key Data Structures}
+
+The combining tree was implemented as a balanced $k$-ary tree, where the fan-out ($k$) determines the number of children per node. Each node in the tree plays a crucial role in synchronization and aggregation.
+
+Each node maintains the following components:
+\begin{itemize}
+    \item A \textbf{status field} that represents the current synchronization state of the node (e.g., idle, first thread arrived, second thread arrived, or result ready)
+    \item A \textbf{partial value} used to store intermediate aggregated values
+    \item A \textbf{synchronization mechanism} (such as a lock or atomic flag) to coordinate access between threads
+    \item References to \textbf{parent and child nodes} to enable traversal through the tree
+\end{itemize}
+Threads are mapped to leaf nodes, and each thread begins its operation from its assigned leaf and progresses upward toward the root.
+
+\subsubsection*{Atomic Operations Used}
+
+To ensure thread safety and correctness, the implementation relies on atomic operations:
+
+\begin{itemize}
+    \item \textbf{Compare-and-Swap (CAS):} Used to safely update node states and coordinate between threads attempting to access the same node
+    \item \textbf{Atomic reads and writes:} Used for accessing shared variables without introducing race conditions
+\end{itemize}
+These atomic primitives are essential for maintaining consistency and preventing incorrect updates in a concurrent environment.
+
+\subsubsection*{Core Operation Design}
+
+The aggregation operation is designed to follow a hierarchical pattern:
+
+\begin{itemize}
+    \item Each thread starts at its assigned leaf node
+    \item At each node, the thread checks whether another thread has already arrived
+    \item If two threads meet, their input values are combined
+    \item Only one thread proceeds upward with the combined value
+    \item This process continues until the root is reached
+    \item At the root, a single update is applied to the global aggregated result
+    \item The result is then propagated back down to waiting threads
+\end{itemize}
+
+A key aspect of the implementation is that the combining tree is designed as a generalized aggregation structure rather than a fixed counter. The tree accepts a user-defined combine function during initialization, represented as a higher-order function \texttt{(combine:'a ->'a ->'a)}. This function is used consistently during both the upward combining phase and the root update.
+
+As a result, the same data structure can support different operations such as addition (for counting) and maximum (for reduction), as verified by the test suite. This design demonstrates that the combining tree is not limited to increment operations but can be used as a generic parallel reduction structure. This generalization is a key contribution of the implementation, showing that the combining tree can be used as a reusable parallel aggregation framework rather than a problem-specific counter.
+
+This approach ensures that multiple operations are aggregated before reaching the shared aggregation point, significantly reducing contention.
+
+\subsubsection*{Subtle Invariants Maintained}
+
+To ensure correctness, several important invariants were maintained throughout the implementation:
+
+\begin{itemize}
+    \item \textbf{No lost updates:} Every operation performed by any thread must be reflected in the final aggregated result
+    \item \textbf{Single upward propagation:} After combining at a node, only one thread is allowed to move upward
+    \item \textbf{Proper synchronization ordering:} Threads must not bypass synchronization steps at any node
+    \item \textbf{Consistent state transitions:} Node states must change in a controlled and valid manner to avoid race conditions
+\end{itemize}
+Maintaining these invariants was critical to ensuring that the system behaves correctly under concurrent execution.
+
+\subsubsection*{Design Choices}
+
+Several important design decisions were made during implementation:
+
+\begin{itemize}
+    \item \textbf{Fan-out selection:} The combining tree was implemented with fan-out values of 2 and 4 to study how branching affects performance
+    \item \textbf{Balanced tree structure:} Ensures even distribution of threads and avoids bottlenecks at specific nodes
+    \item \textbf{Static thread-to-leaf mapping:} Simplifies implementation and reduces runtime overhead
+    \item \textbf{Separate baseline implementations:} Atomic FAA and CAS-based counters were implemented independently to allow fair comparison
+\end{itemize}
+These choices were made to balance simplicity, correctness, and performance evaluation.
+
+\subsection*{3.2 Testing and Verification}
+
+Ensuring correctness in concurrent systems is challenging due to non-deterministic execution. Therefore, extensive testing and verification were performed to validate the implementation.
+
+\subsubsection*{Testing Methodology}
+
+A comprehensive testing approach was used, covering multiple aspects of the system:
+
+\begin{itemize}
+    \item Functional tests: Verified correctness of tree construction and basic operations
+    \item Single-thread tests: Ensured correctness when only one thread is executing
+    \item Multi-thread tests: Verified behavior under concurrent execution
+    \item Stress tests: Tested the system under high contention and large workloads
+    \item Baseline comparison tests: Compared results with atomic FAA and CAS implementations
+\end{itemize}
+In addition to counting workloads, the implementation was also tested with a maximum-reduction operation using a custom combine function (\texttt{Int.max}). These tests verified that the tree correctly supports generic aggregation beyond simple increment operations, confirming the correctness of the generalized design.
+
+\textbf{All tests passed successfully}, confirming the correctness of the implementation.
+
+\subsubsection*{Verification of Correctness}
+
+Correctness was verified using the following criteria:
+
+\begin{itemize}
+    \item \textbf{Linearizability:} Each operation appears to occur atomically at some point in time
+    \item \textbf{Consistency of results:} The final aggregated value matches the expected result
+    \item \textbf{Absence of race conditions:} No inconsistent or unexpected states were observed during execution
+\end{itemize}
+
+\subsubsection*{Bugs Identified and Fixed}
+
+During development, several issues were encountered and resolved:
+
+\begin{itemize}
+    \item \textbf{Incorrect node state transitions}: Fixed to ensure proper synchronization between threads
+    \item \textbf{Errors in result propagation}: Corrected to ensure all threads receive the correct output
+    \item \textbf{Race conditions at intermediate nodes}: Resolved using stronger atomic guarantees and careful synchronization
+\end{itemize}
+These fixes improved both correctness and stability of the implementation.
+
+\subsubsection*{Confidence in Implementation}
+
+The combination of structured testing, stress testing, and comparison with baseline implementations provides strong confidence that the combining tree structure is correct and reliable under concurrent workloads.
+
+% =============================================================================
+\section{Evaluation}
+\label{sec:evaluation}
+% =============================================================================
+
+\subsection{Experimental Setup}
+
+\begin{itemize}
+    \item Threads: 2 to 8
+    \item Operations per thread: 50{,}000
+    \item Runs: 5
+    \item Metrics:
+    \begin{itemize}
+        \item Throughput (ops/sec)
+        \item Latency (ns/op)
+    \end{itemize}
+\end{itemize}
+
+\subsection{Results}
+
+\subsubsection*{Throughput (ops/sec)}
+
+\begin{center}
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+\textbf{Threads} & \textbf{Atomic FAA} & \textbf{CAS Loop} & \textbf{CT (fan=2)} & \textbf{CT (fan=4)} \\
+\hline
+2 & 37.8M & 28.2M & 2.19M & 3.04M \\
+3 & 27.3M & 18.8M & 2.76M & 2.11M \\
+4 & 32.0M & 8.99M & 3.09M & 1.69M \\
+5 & 18.6M & 6.63M & 3.93M & 2.24M \\
+6 & 28.1M & 6.13M & 4.15M & 2.58M \\
+7 & 23.4M & 4.80M & 5.13M & 2.86M \\
+8 & 22.7M & 4.61M & 5.57M & 3.18M \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection*{Latency (ns/op)}
+
+\begin{center}
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+\textbf{Threads} & \textbf{Atomic FAA} & \textbf{CAS Loop} & \textbf{CT (fan=2)} & \textbf{CT (fan=4)} \\
+\hline
+2 & 27 & 35 & 456 & 329 \\
+4 & 31 & 117 & 324 & 594 \\
+8 & 46 & 223 & 179 & 314 \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Detailed Analysis}
+
+\subsubsection*{1. Atomic FAA Performance}
+
+Atomic FAA achieves extremely high throughput and very low latency across all thread counts.
+
+\textbf{Why this happens:}
+\begin{itemize}
+    \item It uses a single hardware atomic instruction
+    \item Modern CPUs heavily optimize such operations
+    \item Cache coherence protocols handle moderate contention efficiently
+\end{itemize}
+Even at higher thread counts, FAA remains dominant because:
+\begin{itemize}
+    \item The overhead per operation is minimal
+    \item There is no structural traversal cost
+\end{itemize}
+
+\subsubsection*{2. CAS Loop Behavior}
+
+CAS performs well at low thread counts but degrades rapidly.
+
+\textbf{Reason:}
+\begin{itemize}
+    \item CAS relies on retry loops
+    \item Under contention:
+    \begin{itemize}
+        \item Many threads fail CAS attempts
+        \item Retries increase significantly
+    \end{itemize}
+    \item Leads to wasted computation and higher latency
+\end{itemize}
+At higher threads:
+\begin{itemize}
+    \item Throughput drops sharply
+    \item Latency increases significantly
+\end{itemize}
+
+\subsubsection*{3. Combining Tree (Fan-out = 2)}
+
+The combining tree with fan-out 2 shows consistent improvement as thread count increases.
+
+\textbf{Why performance improves:}
+\begin{itemize}
+    \item Operations are combined early
+    \item Fewer updates reach the root
+    \item Contention is distributed
+\end{itemize}
+At higher threads:
+\begin{itemize}
+    \item Throughput steadily increases
+    \item Latency decreases compared to lower thread counts
+\end{itemize}
+This indicates effective contention management.
+
+\subsubsection*{4. Combining Tree (Fan-out = 4)}
+
+Fan-out 4 performs worse than fan-out 2.
+
+\textbf{Reason:}
+\begin{itemize}
+    \item More threads converge at each node
+    \item Increased contention at node level
+    \item Synchronization delays increase
+\end{itemize}
+Although the tree is shallower:
+\begin{itemize}
+    \item The increased contention outweighs traversal benefits
+\end{itemize}
+
+\subsubsection*{5. Key Scalability Insight}
+
+The combining tree shows a \textbf{clear upward trend in throughput} as threads increase.
+
+\textbf{Why:}
+\begin{itemize}
+    \item More opportunities for combining
+    \item Better utilization of hierarchical structure
+    \item Reduced pressure on root
+\end{itemize}
+In contrast:
+\begin{itemize}
+    \item CAS suffers from contention amplification
+    \item FAA remains stable but does not benefit from combining
+\end{itemize}
+
+\subsubsection*{6. Important Observation}
+
+At 8 threads:
+\begin{itemize}
+    \item Combining Tree (fan=2): $\sim$5.57M ops/sec
+    \item CAS: $\sim$4.61M ops/sec
+\end{itemize}
+This confirms that the combining tree \textbf{outperforms CAS under high contention}.
+
+\subsubsection*{7. Latency Behavior}
+
+Latency decreases for the combining tree at higher thread counts.
+
+\textbf{Why:}
+\begin{itemize}
+    \item More combining occurs
+    \item Fewer operations reach the root
+    \item Effective work per operation increases
+\end{itemize}
+
+\subsection{Overall Interpretation}
+
+The results clearly demonstrate:
+\begin{itemize}
+    \item Atomic FAA performs best due to hardware optimization
+    \item CAS performs worst due to retry overhead
+    \item Combining tree:
+    \begin{itemize}
+        \item Trades latency for scalability
+        \item Becomes more efficient as contention increases
+    \end{itemize}
+\end{itemize}
+Although the evaluation focuses on counting workloads, the implementation also supports other aggregation operations such as maximum, demonstrating its general applicability. 
+% Example figure:
+% \begin{figure}[h]
+%   \centering
+%   \includegraphics[width=0.8\linewidth]{figures/throughput.pdf}
+%   \caption{Throughput vs. threads under the balanced workload.}
+%   \label{fig:throughput}
+% \end{figure}
+
+% =============================================================================
+\section{Reflection on the Use of LLMs}
+\label{sec:llm}
+% =============================================================================
+\subsection*{Tools and Models Used}
+
+\begin{itemize}
+    \item \textbf{For Code:} Started with GitHub Copilot, but it struggled with OCaml 5's concurrency. We switched to Cursor for the bulk of the \texttt{tree.ml} and \texttt{node.ml} logic. Once we ran out of Cursor credits, we moved to Antigravity. We mainly used it to debug test hangs, clean up broken dune dependencies (such as the old \texttt{test\_reference} folder), rewrite the tree to handle generic fan-outs, and write benchmark scripts.
+    
+    \item \textbf{For Report:} Used ChatGPT to help format the \LaTeX{} document and structure benchmark tables.
+    
+    \item \textbf{For Slides:} Used Cursor for slide content, Gemini to generate the initial structure, and Google Slides for final polishing.
+\end{itemize}
+
+\subsection*{Learnings}
+LLMs were highly useful, but we anticipated errors in lock-free programming. To address this, we relied heavily on the textbook (AoMPP Chapter 12). The models occasionally misimplemented the ``first thread waits, last thread combines'' logic, but our understanding of the algorithm allowed us to guide corrections. Additionally, the models sometimes removed useful code, making frequent Git commits essential.
+
+\subsection*{What Worked Well}
+\begin{itemize}
+    \item \textbf{Debugging deadlocks:} When increasing the tree fan-out from 2 to 4, tests began to hang. The LLM effectively analyzed CAS loops in \texttt{node.ml} and corrected state transitions to eliminate deadlocks.
+    
+    \item \textbf{Writing tests:} It generated boilerplate for QCheck-Lin linearizability tests accurately with minimal correction.
+    
+    \item \textbf{Fixing the build:} When the \texttt{dune} build failed due to unused test folders, the LLM quickly identified and removed unnecessary files, fixing configuration issues efficiently.
+\end{itemize}
+
+\subsection*{What Did Not Work}
+
+\begin{itemize}
+    \item \textbf{Broken CAS logic:} Early implementations included retry loops that appeared correct but were subtly flawed. Threads misinterpreted synchronization states (e.g., \texttt{FIRST}, \texttt{SECOND}), causing infinite spinning instead of combining.
+    
+    \item \textbf{Hallucinating OCaml features:} The model sometimes assumed unavailable features, like using nonexistent OCaml 5 Domain APIs.
+    
+    \item \textbf{Tool setup limitations:} Attempts to configure ThreadSanitizer (TSAN) failed due to system-level issues such as Kernel ASLR, which the LLM could not resolve.
+\end{itemize}
+
+\subsection*{What Was Surprising}
+
+\begin{itemize}
+    \item \textbf{Positive:} The LLM was highly effective at parsing large volumes of output, including QCheck-Lin traces and benchmark data, and converting them into structured tables for reporting.
+    
+    \item \textbf{Negative:} GitHub Copilot performed poorly with OCaml 5, frequently suggesting traditional mutex-based approaches instead of the required lock-free atomic operations.
+\end{itemize}
+
+\subsection*{What Was Difficult}
+
+The primary challenge was the LLM's limited understanding of hardware-level behavior and newer OCaml features:
+
+\begin{itemize}
+    \item \textbf{Outdated OCaml syntax:} The model frequently suggested patterns from older OCaml versions (e.g., \texttt{Thread} module), requiring manual correction.
+    
+    \item \textbf{Hardware-level trade-offs:} Decisions such as using \texttt{Domain.cpu\_relax()} in spin loops required manual reasoning, as the LLM could not reliably evaluate contention and performance trade-offs.
+\end{itemize}
+
+\subsection*{Overall Assessment}
+
+Overall, LLMs significantly improved productivity, reducing debugging time and simplifying test development. However, their limitations in concurrent programming required careful validation. A good theoretical understanding was important to identify and correct subtle errors. LLMs proved to be valuable tools when used alongside domain knowledge.
+
+% =============================================================================
+\section{Conclusions}
+\label{sec:conclusions}
+% =============================================================================
+\subsection*{Answer to Research Question}
+
+\begin{itemize}
+    \item In the tested range (2--8 threads), the combining tree \textbf{does not outperform atomic fetch-and-add (FAA)}
+    \begin{itemize}
+        \item FAA remains superior due to extremely low, hardware-optimized constant-time operations
+    \end{itemize}
+
+    \item The combining tree introduces \textbf{additional coordination overhead}
+    \begin{itemize}
+        \item Tree traversal and synchronization at multiple nodes dominate at low and moderate thread counts
+    \end{itemize}
+
+    \item However, combining tree (fan-out = 2) shows \textbf{clear scalability trends}
+    \begin{itemize}
+        \item Throughput increases steadily with threads
+        \item Already \textbf{outperforms CAS} at higher thread counts (7--8 threads)
+    \end{itemize}
+
+    \item The \textbf{crossover point with FAA is not reached} in this experiment
+    \begin{itemize}
+        \item Because contention is not high enough within 8 threads
+    \end{itemize}
+
+    \item This is expected since the experiments were conducted on a \textbf{quad-core system}
+    \begin{itemize}
+        \item Limited hardware parallelism restricts contention levels
+        \item FAA remains efficient under such conditions
+    \end{itemize}
+
+    \item \textbf{Fan-out impact on crossover point}:
+    \begin{itemize}
+        \item Fan-out = 2
+        \begin{itemize}
+            \item Better contention distribution
+            \item Earlier (more favorable) crossover point
+        \end{itemize}
+
+        \item Fan-out = 4
+        \begin{itemize}
+            \item Higher contention per node
+            \item Delays or prevents crossover
+        \end{itemize}
+    \end{itemize}
+
+    \item \textbf{Conclusion}:
+    \begin{itemize}
+        \item The combining tree’s $O(\log n)$ advantage is expected to become dominant \textbf{at higher thread counts (e.g., 16+ threads)}
+        \item Where contention on a single shared counter becomes a major bottleneck
+    \end{itemize}
+\end{itemize}
+
+\subsection*{Key Findings}
+
+\begin{itemize}
+    \item Combining trees scale effectively with threads
+    \item CAS does not scale well
+    \item FAA remains fastest overall
+    \item Fan-out = 2 is optimal
+\end{itemize}
+
+\subsection*{Limitations}
+
+\begin{itemize}
+    \item Limited thread range
+    \item No adaptive tuning
+    \item No hardware-aware optimizations
+\end{itemize}
+
+\subsection*{Future Work}
+
+\begin{itemize}
+    \item Test on larger systems
+    \item Adaptive tree structures
+    \item Cache-aware optimizations
+    \item Hybrid approaches
+\end{itemize}
+
+
+\section*{Final Remark}
+\label{sec:final remark}
+This project demonstrates that \textbf{hierarchical synchronization techniques such as combining trees are powerful tools for reducing contention}, especially in high-concurrency environments, and provide valuable insights into scalable concurrent system design.
+
+
+% =============================================================================
+\section*{Contributions}
+\label{sec:contributions}
+% =============================================================================
+% Required. Percentages must sum to 100. Every member should contribute.
+\begin{center}
+\begin{tabular}{@{}lcl@{}}
+\toprule
+\textbf{Member} & \textbf{Contribution (\%)} & \textbf{Main responsibilities} \\
+\midrule
+Ravirala Sreevasthav   & 37\% & Software combining tree implementation and benchmarking, reviewed report\\
+Gurrala Abhishek   & 30\% & Writing detailed report, cross-checked tree implementation.\\
+Muchala Sri Charith & 33\% & Prepartion of presentation, demo recording, cross-checked tree implementation\\
+\midrule
+\textbf{Total} & \textbf{100\%} & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =============================================================================
+\bibliographystyle{plainurl}
+\bibliography{references}
+The Art of Multiprocessor Programming, 2nd Edition by Maurice Herlihy, Nir Shavit, Victor Luchangco, and Michael Spear
+% =============================================================================
+
+\end{document}
